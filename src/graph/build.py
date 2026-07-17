@@ -44,17 +44,20 @@ def build_graph(nodes: dict, checkpointer=None):
     return graph.compile(checkpointer=checkpointer)
 
 
-def build_mock_graph(checkpointer=None):
-    from . import mock_nodes
+def build_dev_graph(checkpointer=None):
+    """Real run_sql + real citation validator, templated (non-LLM) positions
+    and judge. No API spend, no network beyond localhost sqlite. Real prompts
+    replace assign_positions/judge in phase 3."""
+    from . import nodes
 
     return build_graph(
         {
-            "assign_positions": mock_nodes.assign_positions,
-            "advocate_for": mock_nodes.advocate_for,
-            "validate_for": mock_nodes.validate_for,
-            "advocate_against": mock_nodes.advocate_against,
-            "validate_against": mock_nodes.validate_against,
-            "judge": mock_nodes.judge,
+            "assign_positions": nodes.assign_positions,
+            "advocate_for": nodes.advocate_for,
+            "validate_for": nodes.validate_for,
+            "advocate_against": nodes.advocate_against,
+            "validate_against": nodes.validate_against,
+            "judge": nodes.judge,
         },
         checkpointer=checkpointer,
     )

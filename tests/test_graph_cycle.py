@@ -1,18 +1,26 @@
 """Proves the argue/rebut loop is a real graph cycle (advocate_for gets
 invoked more than once via the conditional edge, not unrolled into separate
 nodes per round) and that the controller's three stop conditions each reach
-judge. Uses the phase-1 mock nodes -- no LLM, no network, no API spend."""
+judge. Uses build_dev_graph: real run_sql against the seeded db and the real
+citation validator, but templated (non-LLM) positions/judge -- no network,
+no API spend."""
 import unittest
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-from src.graph.build import build_mock_graph
+from src.data.seed import DB_PATH, build as seed_db
+from src.graph.build import build_dev_graph
 from src.state import DebateState
+
+
+def setUpModule():
+    if not DB_PATH.exists():
+        seed_db()
 
 
 class TestGraphCycle(unittest.TestCase):
     def _run(self, max_rounds, checkpointer=None, thread_id="t1"):
-        graph = build_mock_graph(checkpointer=checkpointer)
+        graph = build_dev_graph(checkpointer=checkpointer)
         initial = DebateState(question="does the mock cycle actually loop?", max_rounds=max_rounds)
         config = {"configurable": {"thread_id": thread_id}} if checkpointer else None
         return graph.invoke(initial, config=config)
@@ -26,6 +34,19 @@ class TestGraphCycle(unittest.TestCase):
         self.assertEqual(len(result["evidence_ledger"]), 6)
         rounds_seen = sorted({t.round for t in result["transcript"]})
         self.assertEqual(rounds_seen, [1, 2, 3])
+
+    def test_validator_strikes_the_uncited_sentence_end_to_end(self):
+        result = self._run(max_rounds=1)
+        for entry in result["transcript"]:
+            self.assertEqual(len(entry.struck_sentences), 1)
+            self.assertNotIn("as anyone can see", entry.validated_text)
+            self.assertTrue(entry.citations)
+
+    def test_evidence_ledger_holds_real_query_results(self):
+        result = self._run(max_rounds=1)
+        for evidence in result["evidence_ledger"]:
+            self.assertTrue(evidence.query.strip().upper().startswith("SELECT"))
+            self.assertNotEqual(evidence.result, "mock row")
 
     def test_single_round_stops_immediately(self):
         result = self._run(max_rounds=1)
@@ -50,7 +71,7 @@ class TestGraphCycle(unittest.TestCase):
 
     def test_resumes_from_checkpoint_after_interruption(self):
         with SqliteSaver.from_conn_string(":memory:") as checkpointer:
-            graph = build_mock_graph(checkpointer=checkpointer)
+            graph = build_dev_graph(checkpointer=checkpointer)
             config = {"configurable": {"thread_id": "resume-test"}}
             initial = DebateState(question="resume me", max_rounds=3)
 
