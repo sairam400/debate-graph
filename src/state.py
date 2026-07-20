@@ -36,6 +36,7 @@ class Verdict(BaseModel):
     confidence: float
     deciding_evidence: list[str] = Field(default_factory=list)
     rationale: str
+    final_answer: str
 
 
 class DebateState(BaseModel):

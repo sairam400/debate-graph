@@ -118,5 +118,6 @@ def judge(state: DebateState) -> dict:
             "confidence": 0.0,
             "deciding_evidence": [e.id for e in state.evidence_ledger],
             "rationale": f"(template) stopped because {state.controller_decision}",
+            "final_answer": "(template) no real judge prompt yet",
         }
     }

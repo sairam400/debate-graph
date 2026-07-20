@@ -1,12 +1,21 @@
 import unittest
 
 from src.data.seed import DB_PATH, build as seed_db
-from src.tools.sql import ToolError, run_sql
+from src.tools.sql import ToolError, get_schema, run_sql
 
 
 def setUpModule():
     if not DB_PATH.exists():
         seed_db()
+
+
+class TestGetSchema(unittest.TestCase):
+    def test_lists_all_tables_with_columns(self):
+        schema = get_schema()
+        for table in ("products", "customers", "orders", "order_items", "returns"):
+            self.assertIn(table, schema)
+        self.assertIn("category", schema)
+        self.assertIn("order_date", schema)
 
 
 class TestRunSql(unittest.TestCase):

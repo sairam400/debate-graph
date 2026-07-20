@@ -20,6 +20,26 @@ class ToolError(Exception):
     pass
 
 
+def get_schema(db_path: Path = DB_PATH) -> str:
+    """Tables and columns, since run_sql can't be used for introspection --
+    PRAGMA is on the forbidden-keyword list, and models shouldn't be
+    expected to guess column names blind."""
+    conn = sqlite3.connect(db_path)
+    try:
+        tables = [
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        ]
+        lines = []
+        for table in tables:
+            columns = [r[1] for r in conn.execute(f'PRAGMA table_info("{table}")').fetchall()]
+            lines.append(f"{table}({', '.join(columns)})")
+        return "\n".join(lines)
+    finally:
+        conn.close()
+
+
 def run_sql(query: str, db_path: Path = DB_PATH) -> dict:
     if not _READ_ONLY_PATTERN.match(query):
         raise ToolError("run_sql only accepts queries that start with SELECT")

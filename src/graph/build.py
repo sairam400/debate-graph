@@ -61,3 +61,24 @@ def build_dev_graph(checkpointer=None):
         },
         checkpointer=checkpointer,
     )
+
+
+def build_llm_graph(provider: str, model: str | None = None, plan: list | None = None, checkpointer=None):
+    """provider: 'ollama', 'groq', or 'mock'. plan is required (and only
+    meaningful) for provider='mock' -- see providers/mock_chat.py."""
+    from . import llm_nodes, nodes
+    from ..providers.factory import get_chat_model
+
+    llm = get_chat_model(provider, model=model, plan=plan)
+
+    return build_graph(
+        {
+            "assign_positions": llm_nodes.make_assign_positions(llm),
+            "advocate_for": llm_nodes.make_advocate_for(llm),
+            "validate_for": nodes.validate_for,
+            "advocate_against": llm_nodes.make_advocate_against(llm),
+            "validate_against": nodes.validate_against,
+            "judge": llm_nodes.make_judge(llm),
+        },
+        checkpointer=checkpointer,
+    )
