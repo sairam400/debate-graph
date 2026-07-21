@@ -1,5 +1,20 @@
 # Known issues
 
+**Groq's tokens-per-day limit cut the big/debate eval condition short.**
+Free tier caps `llama-3.3-70b-versatile` at 100,000 tokens/day, separate
+from the RPM limit `RateLimitedChatGroq` already handled, and with no fixed
+reset time -- Groq's error names an exact wait instead ("Please try again
+in 3m19.584s"). 7 of 14 big/debate cases hit this mid-experiment. Fixed two
+things: `RateLimitedChatGroq._generate` now parses that hint and sleeps the
+suggested duration (capped, bounded number of attempts) instead of blind
+exponential backoff that either gave up too early or waited needlessly
+long; and `run_experiment`'s resume logic was treating `errored`/`timed_out`
+cases as permanently done, so a rerun would never actually retry them --
+fixed to only skip cases with a real completed result. Retried after the
+fix; some still didn't clear the daily window in the time available (see
+README results section for the honest accounting of which numbers are
+clean vs. contaminated by this).
+
 **A worker exception crashed the entire eval run over a single case.** The
 per-case `ThreadPoolExecutor` timeout only caught `concurrent.futures.
 TimeoutError` (the case hanging past its budget) -- it did not catch an
@@ -42,15 +57,6 @@ httpx client. Fixed by passing `client_kwargs={"timeout":
 OLLAMA_TIMEOUT_SECONDS}` (default 180s) in `providers/factory.py`. A timeout
 turns a silent hang into a real, catchable exception -- which for an
 unattended run matters more than getting the number exactly right.
-
-**`assign_positions` and `judge` are still templated, not real prompts.**
-They return fixed-shape placeholder text. `advocate_for/against` are real as
-of phase 2 (real `run_sql` against the seeded db, real evidence ledger) but
-still pick their query from a small fixed rotation rather than a model
-deciding what to ask -- that's the one piece phase 3 replaces. Every
-argument also includes one deliberately uncited filler sentence so the
-citation validator has something real to strike in the end-to-end tests, not
-just in validator.py's own unit tests.
 
 **Sentence splitting in the citation validator is a punctuation regex, not a
 real tokenizer.** Works fine for the plain, short prose these nodes generate
