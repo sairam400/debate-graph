@@ -5,7 +5,21 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_groq import ChatGroq
 
-from src.providers.rate_limited_groq import GroqRateLimitError, RateLimitedChatGroq
+from src.providers.rate_limited_groq import (
+    GroqRateLimitError,
+    RateLimitedChatGroq,
+    _parse_retry_after_seconds,
+)
+
+# Real message from a live 429 hit during eval testing (tokens-per-day limit).
+_REAL_TPD_MESSAGE = (
+    "Error code: 429 - {'error': {'message': \"Rate limit reached for model "
+    "`llama-3.3-70b-versatile` in organization `org_x` service tier "
+    "`on_demand` on tokens per day (TPD): Limit 100000, Used 99772, "
+    "Requested 459. Please try again in 3m19.584s. Need more tokens? "
+    "Upgrade to Dev Tier today at https://console.groq.com/settings/billing\", "
+    "'type': 'tokens', 'code': 'rate_limit_exceeded'}}"
+)
 
 
 def _fake_result(text="ok"):
@@ -87,6 +101,73 @@ class TestBackoff(unittest.TestCase):
             with self.assertRaises(ValueError):
                 llm._generate([])
         self.assertEqual(calls["n"], 1)
+
+
+class TestRetryAfterParsing(unittest.TestCase):
+    def test_parses_minutes_and_seconds(self):
+        self.assertAlmostEqual(_parse_retry_after_seconds(_REAL_TPD_MESSAGE), 3 * 60 + 19.584)
+
+    def test_parses_seconds_only(self):
+        self.assertAlmostEqual(_parse_retry_after_seconds("try again in 33.5s"), 33.5)
+
+    def test_no_hint_returns_none(self):
+        self.assertIsNone(_parse_retry_after_seconds("Error code: 429 - rate limit exceeded"))
+
+
+class TestRetryAfterBackoff(unittest.TestCase):
+    def test_honors_the_suggested_wait_then_succeeds(self):
+        llm = RateLimitedChatGroq(model="llama-3.3-70b-versatile", api_key="fake", rpm=1000)
+        calls = {"n": 0}
+
+        def tpd_then_ok(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError(_REAL_TPD_MESSAGE)
+            return _fake_result("recovered")
+
+        sleeps = []
+        with patch.object(ChatGroq, "_generate", side_effect=tpd_then_ok), \
+             patch("time.sleep", side_effect=sleeps.append):
+            result = llm._generate([])
+
+        self.assertEqual(result.generations[0].message.content, "recovered")
+        self.assertEqual(len(sleeps), 1)
+        self.assertAlmostEqual(sleeps[0], 3 * 60 + 19.584 + 2.0)
+
+    def test_wait_is_capped_at_max_retry_after_wait_seconds(self):
+        llm = RateLimitedChatGroq(
+            model="llama-3.3-70b-versatile", api_key="fake", rpm=1000,
+            max_retry_after_wait_seconds=60.0,
+        )
+        message = "Error code: 429 - rate limit. Please try again in 45m0s."
+        calls = {"n": 0}
+
+        def tpd_then_ok(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError(message)
+            return _fake_result("recovered")
+
+        sleeps = []
+        with patch.object(ChatGroq, "_generate", side_effect=tpd_then_ok), \
+             patch("time.sleep", side_effect=sleeps.append):
+            llm._generate([])
+
+        self.assertEqual(sleeps, [60.0])
+
+    def test_gives_up_after_max_retry_after_attempts(self):
+        llm = RateLimitedChatGroq(
+            model="llama-3.3-70b-versatile", api_key="fake", rpm=1000,
+            max_retry_after_attempts=2,
+        )
+
+        def always_tpd(*args, **kwargs):
+            raise RuntimeError(_REAL_TPD_MESSAGE)
+
+        with patch.object(ChatGroq, "_generate", side_effect=always_tpd), \
+             patch("time.sleep", return_value=None):
+            with self.assertRaises(GroqRateLimitError):
+                llm._generate([])
 
 
 if __name__ == "__main__":

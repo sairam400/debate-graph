@@ -6,7 +6,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-Side = Literal["for", "against"]
+Side = Literal["for", "against", "solo"]
 ControllerDecision = Literal[
     "continue", "stop_max_rounds", "stop_concession", "stop_no_new_evidence"
 ]
@@ -48,3 +48,18 @@ class DebateState(BaseModel):
     max_rounds: int = 3
     controller_decision: Optional[ControllerDecision] = None
     verdict: Optional[Verdict] = None
+
+
+class SoloState(BaseModel):
+    """State for the single-analyst baseline: analyst -> validate ->
+    finalize. No positions, no rounds, no controller -- one pass, same
+    evidence ledger and citation validator as the debate graph so the two
+    conditions differ in graph shape, not in tooling or evidence discipline.
+    """
+    question: str
+    evidence_ledger: list[EvidenceEntry] = Field(default_factory=list)
+    raw_answer: str = ""
+    validated_answer: str = ""
+    citations: list[str] = Field(default_factory=list)
+    struck_sentences: list[str] = Field(default_factory=list)
+    final_answer: Optional[str] = None

@@ -9,10 +9,14 @@ def get_chat_model(provider: str, model: str | None = None, plan: list | None = 
     if provider == "ollama":
         from langchain_ollama import ChatOllama
 
+        # No timeout by default means a stalled connection hangs forever --
+        # happened during real testing (see KNOWN_ISSUES.md). client_kwargs
+        # passes through to the underlying ollama.Client's httpx client.
         return ChatOllama(
             model=model or SETTINGS.ollama_model,
             base_url=SETTINGS.ollama_base_url,
             temperature=0,
+            client_kwargs={"timeout": SETTINGS.ollama_timeout_seconds},
         )
 
     if provider == "groq":

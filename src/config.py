@@ -35,6 +35,7 @@ class Settings:
 
         self.ollama_model = get_env("OLLAMA_MODEL", "qwen2.5:7b")
         self.ollama_base_url = get_env("OLLAMA_BASE_URL", "http://localhost:11434")
+        self.ollama_timeout_seconds = int(get_env("OLLAMA_TIMEOUT_SECONDS", "180"))
 
         self.groq_api_key = get_env("GROQ_API_KEY")
         self.groq_model = get_env("GROQ_MODEL", "llama-3.3-70b-versatile")

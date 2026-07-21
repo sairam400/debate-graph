@@ -1,5 +1,48 @@
 # Known issues
 
+**A worker exception crashed the entire eval run over a single case.** The
+per-case `ThreadPoolExecutor` timeout only caught `concurrent.futures.
+TimeoutError` (the case hanging past its budget) -- it did not catch an
+exception the worker actually *raised*, which `future.result()` re-raises
+in the caller. This happened live: the 180s `ChatOllama` request timeout
+(below) fired correctly and raised `httpx.ReadTimeout`, which propagated
+uncaught through the whole run and killed the process mid-experiment, 10 of
+14 debate cases in. Fixed by also catching `Exception` in
+`_run_one_case_with_timeout` and recording it as an `errored` case instead
+of letting it propagate -- covered by
+`test_worker_exception_is_recorded_not_raised` in `tests/test_run_eval.py`.
+Discovered this way rather than in review, which is itself the argument for
+why the "verify on real infrastructure before committing" step of this
+project's process matters -- a mocked test never would have hit this, since
+`MockChatModel` doesn't make real HTTP calls.
+
+**A single stuck case had no ceiling, so it could block the whole eval run
+even with the request timeout below.** The per-request `ChatOllama` timeout
+bounds one HTTP call, but a case can make many calls (multiple rounds x
+both sides x multiple tool calls) with no overall cap, and that's exactly
+what happened in testing -- a debate case sat idle for 30+ minutes with
+zero CPU on both the client and `ollama serve` before being killed manually.
+Fixed with a per-case wall-clock cap (`CASE_TIMEOUT_SECONDS`, 600s) in
+`eval/run_eval.py`, using a `ThreadPoolExecutor` so the harness can abandon
+a stuck case and move on. The blocked thread itself is leaked (Python can't
+force-kill a thread) and lingers until the whole process eventually exits --
+that's an accepted cost, since the property that actually matters for an
+unattended run is that one bad case can't stop the other 27 from completing,
+not that resources are pristine. `shutdown(wait=False)` in that function is
+required for the same reason: the default `wait=True` would block on exactly
+the same stuck thread the timeout was supposed to stop waiting for.
+
+**`ChatOllama` had no request timeout, so a stalled connection hung forever.**
+During the real phase 4 eval run (qwen2.5:3b, debate condition), the process
+went idle -- zero CPU on both the client and the `ollama serve` process --
+partway through a case and never recovered; had to be killed manually.
+`ChatOllama` doesn't expose a timeout parameter directly, but accepts
+`client_kwargs`, which passes through to the underlying `ollama.Client`'s
+httpx client. Fixed by passing `client_kwargs={"timeout":
+OLLAMA_TIMEOUT_SECONDS}` (default 180s) in `providers/factory.py`. A timeout
+turns a silent hang into a real, catchable exception -- which for an
+unattended run matters more than getting the number exactly right.
+
 **`assign_positions` and `judge` are still templated, not real prompts.**
 They return fixed-shape placeholder text. `advocate_for/against` are real as
 of phase 2 (real `run_sql` against the seeded db, real evidence ledger) but
